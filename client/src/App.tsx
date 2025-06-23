@@ -1,45 +1,179 @@
-
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BusinessCardForm } from '@/components/BusinessCardForm';
 import { BusinessCardList } from '@/components/BusinessCardList';
 import { PublicCardView } from '@/components/PublicCardView';
-import { trpc } from '@/utils/trpc';
+import { LandingPage } from '@/components/LandingPage';
+import { AuthForms } from '@/components/AuthForms';
+import { createTRPCClient, httpBatchLink, loggerLink } from '@trpc/client';
+import type { AppRouter } from '../../server/src';
+import superjson from 'superjson';
 import { useState, useEffect, useCallback } from 'react';
 import type { BusinessCard, CreateBusinessCardInput } from '../../server/src/schema';
 
+// Create authenticated trpc client
+function createAuthenticatedTRPCClient() {
+  return createTRPCClient<AppRouter>({
+    links: [
+      httpBatchLink({ 
+        url: '/api', 
+        transformer: superjson,
+        headers() {
+          const token = localStorage.getItem('auth_token');
+          return token ? { authorization: `Bearer ${token}` } : {};
+        }
+      }),
+      loggerLink({
+        enabled: (opts) =>
+          (typeof window !== 'undefined') ||
+          (opts.direction === 'down' && opts.result instanceof Error),
+      }),
+    ],
+  });
+}
+
 function App() {
+  const [trpc] = useState(() => createAuthenticatedTRPCClient());
   const [cards, setCards] = useState<BusinessCard[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('create');
+  
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [user, setUser] = useState<{ id: number; email: string } | null>(null);
+  
+  // Navigation state
+  const [currentView, setCurrentView] = useState<'landing' | 'auth' | 'app'>('landing');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
 
   // Check if we're viewing a public card - do this first but don't return yet
   const path = window.location.pathname;
   const isPublicView = path.startsWith('/card/');
   const uniqueUrl = isPublicView ? path.replace('/card/', '') : null;
 
-  // Always call hooks in the same order
+  // Check authentication status on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        setIsAuthLoading(false);
+        return;
+      }
+
+      try {
+        const userData = await trpc.auth.me.query();
+        setUser(userData);
+        setIsAuthenticated(true);
+        setCurrentView('app');
+      } catch (error) {
+        console.error('Authentication check failed:', error);
+        localStorage.removeItem('auth_token');
+        setIsAuthenticated(false);
+      } finally {
+        setIsAuthLoading(false);
+      }
+    };
+
+    if (!isPublicView) {
+      checkAuth();
+    } else {
+      setIsAuthLoading(false);
+    }
+  }, [trpc, isPublicView]);
+
+  // Load cards when authenticated
   const loadCards = useCallback(async () => {
+    if (!isAuthenticated) return;
+    
     try {
       const result = await trpc.getBusinessCards.query();
       setCards(result);
     } catch (error) {
       console.error('Failed to load business cards:', error);
     }
-  }, []);
+  }, [trpc, isAuthenticated]);
 
   useEffect(() => {
-    // Only load cards if we're not in public view
-    if (!isPublicView) {
+    if (isAuthenticated && currentView === 'app') {
       loadCards();
     }
-  }, [loadCards, isPublicView]);
+  }, [loadCards, isAuthenticated, currentView]);
 
-  // Now do the conditional rendering after all hooks are called
+  // Handle authentication success
+  const handleAuthSuccess = (token?: string) => {
+    if (token) {
+      setIsAuthenticated(true);
+      setCurrentView('app');
+      // The token is already stored in localStorage by AuthForms
+      // Reload user data
+      trpc.auth.me.query().then(userData => {
+        setUser(userData);
+      }).catch(console.error);
+    }
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await trpc.auth.logout.mutate();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      localStorage.removeItem('auth_token');
+      setIsAuthenticated(false);
+      setUser(null);
+      setCards([]);
+      setCurrentView('landing');
+    }
+  };
+
+  // Show loading spinner while checking authentication
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-2xl mb-2">💳</div>
+          <div className="text-lg font-semibold text-gray-600">Loading...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Handle public card view
   if (isPublicView && uniqueUrl) {
     return <PublicCardView uniqueUrl={uniqueUrl} />;
   }
 
+  // Show landing page for unauthenticated users
+  if (!isAuthenticated && currentView === 'landing') {
+    return (
+      <LandingPage
+        onSignUp={() => {
+          setAuthMode('signup');
+          setCurrentView('auth');
+        }}
+        onSignIn={() => {
+          setAuthMode('signin');
+          setCurrentView('auth');
+        }}
+      />
+    );
+  }
+
+  // Show auth forms
+  if (currentView === 'auth') {
+    return (
+      <AuthForms
+        mode={authMode}
+        onSuccess={handleAuthSuccess}
+        onModeChange={setAuthMode}
+        onBack={() => setCurrentView('landing')}
+      />
+    );
+  }
+
+  // Main authenticated app
   const handleCreateCard = async (formData: CreateBusinessCardInput) => {
     setIsLoading(true);
     try {
@@ -74,8 +208,15 @@ function App() {
                 DigitalCard
               </h1>
             </div>
-            <div className="text-sm text-gray-500">
-              Create & Share Digital Business Cards
+            <div className="flex items-center space-x-4">
+              {user && (
+                <span className="text-sm text-gray-600">
+                  👋 Welcome, {user.email.split('@')[0]}
+                </span>
+              )}
+              <Button variant="outline" onClick={handleLogout}>
+                Sign Out
+              </Button>
             </div>
           </div>
         </div>

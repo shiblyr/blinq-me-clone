@@ -1,9 +1,36 @@
 
 import { z } from 'zod';
 
+// User schema
+export const userSchema = z.object({
+  id: z.number(),
+  email: z.string().email(),
+  password_hash: z.string(),
+  created_at: z.coerce.date(),
+  updated_at: z.coerce.date()
+});
+
+export type User = z.infer<typeof userSchema>;
+
+// Auth input schemas
+export const signupInputSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters long")
+});
+
+export type SignupInput = z.infer<typeof signupInputSchema>;
+
+export const signinInputSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  password: z.string().min(1, "Password is required")
+});
+
+export type SigninInput = z.infer<typeof signinInputSchema>;
+
 // Business card schema
 export const businessCardSchema = z.object({
   id: z.number(),
+  user_id: z.number(),
   name: z.string(),
   title: z.string().nullable(),
   company: z.string().nullable(),

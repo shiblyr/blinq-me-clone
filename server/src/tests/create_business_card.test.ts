@@ -2,10 +2,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { businessCardsTable } from '../db/schema';
-import { type CreateBusinessCardInput } from '../schema';
+import { businessCardsTable, usersTable } from '../db/schema';
+import { type CreateBusinessCardInput, type SignupInput } from '../schema';
 import { createBusinessCard } from '../handlers/create_business_card';
+import { signup } from '../handlers/auth/signup';
 import { eq } from 'drizzle-orm';
+
+// Test user for authentication
+const testUser: SignupInput = {
+  email: 'test@example.com',
+  password: 'testpassword123'
+};
 
 // Complete test input with all fields
 const testInput: CreateBusinessCardInput = {
@@ -27,11 +34,27 @@ const minimalInput: CreateBusinessCardInput = {
 };
 
 describe('createBusinessCard', () => {
-  beforeEach(createDB);
+  let userId: number;
+
+  beforeEach(async () => {
+    await createDB();
+    
+    // Create test user
+    await signup(testUser);
+    
+    // Get user ID
+    const users = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.email, testUser.email))
+      .execute();
+    
+    userId = users[0].id;
+  });
+  
   afterEach(resetDB);
 
   it('should create a business card with all fields', async () => {
-    const result = await createBusinessCard(testInput);
+    const result = await createBusinessCard(testInput, userId);
 
     // Basic field validation
     expect(result.name).toEqual('John Doe');
@@ -45,6 +68,7 @@ describe('createBusinessCard', () => {
     expect(result.profile_picture_url).toEqual('https://example.com/profile.jpg');
     expect(result.company_logo_url).toEqual('https://example.com/logo.png');
     expect(result.id).toBeDefined();
+    expect(result.user_id).toEqual(userId);
     expect(result.unique_url).toBeDefined();
     expect(result.unique_url.length).toBeGreaterThan(0);
     expect(result.qr_code_url).toBeNull();
@@ -53,11 +77,12 @@ describe('createBusinessCard', () => {
   });
 
   it('should create a business card with only required fields', async () => {
-    const result = await createBusinessCard(minimalInput);
+    const result = await createBusinessCard(minimalInput, userId);
 
     // Required field validation
     expect(result.name).toEqual('Jane Smith');
     expect(result.id).toBeDefined();
+    expect(result.user_id).toEqual(userId);
     expect(result.unique_url).toBeDefined();
     expect(result.unique_url.length).toBeGreaterThan(0);
     expect(result.created_at).toBeInstanceOf(Date);
@@ -76,8 +101,8 @@ describe('createBusinessCard', () => {
     expect(result.qr_code_url).toBeNull();
   });
 
-  it('should save business card to database', async () => {
-    const result = await createBusinessCard(testInput);
+  it('should save business card to database with user association', async () => {
+    const result = await createBusinessCard(testInput, userId);
 
     // Query using proper drizzle syntax
     const businessCards = await db.select()
@@ -90,18 +115,21 @@ describe('createBusinessCard', () => {
     expect(businessCards[0].title).toEqual('Software Engineer');
     expect(businessCards[0].company).toEqual('Tech Corp');
     expect(businessCards[0].email).toEqual('john@techcorp.com');
+    expect(businessCards[0].user_id).toEqual(userId);
     expect(businessCards[0].unique_url).toEqual(result.unique_url);
     expect(businessCards[0].created_at).toBeInstanceOf(Date);
     expect(businessCards[0].updated_at).toBeInstanceOf(Date);
   });
 
   it('should generate unique URLs for different business cards', async () => {
-    const result1 = await createBusinessCard({ name: 'Person 1' });
-    const result2 = await createBusinessCard({ name: 'Person 2' });
+    const result1 = await createBusinessCard({ name: 'Person 1' }, userId);
+    const result2 = await createBusinessCard({ name: 'Person 2' }, userId);
 
     expect(result1.unique_url).not.toEqual(result2.unique_url);
     expect(result1.unique_url.length).toBeGreaterThan(0);
     expect(result2.unique_url.length).toBeGreaterThan(0);
+    expect(result1.user_id).toEqual(userId);
+    expect(result2.user_id).toEqual(userId);
   });
 
   it('should handle undefined optional fields correctly', async () => {
@@ -112,9 +140,10 @@ describe('createBusinessCard', () => {
       email: undefined
     };
 
-    const result = await createBusinessCard(inputWithUndefined);
+    const result = await createBusinessCard(inputWithUndefined, userId);
 
     expect(result.name).toEqual('Test User');
+    expect(result.user_id).toEqual(userId);
     expect(result.title).toBeNull();
     expect(result.company).toBeNull();
     expect(result.email).toBeNull();

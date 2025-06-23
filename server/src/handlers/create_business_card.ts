@@ -2,16 +2,16 @@
 import { db } from '../db';
 import { businessCardsTable } from '../db/schema';
 import { type CreateBusinessCardInput, type BusinessCard } from '../schema';
-import { nanoid } from 'nanoid';
 
-export const createBusinessCard = async (input: CreateBusinessCardInput): Promise<BusinessCard> => {
+export const createBusinessCard = async (input: CreateBusinessCardInput, userId: number): Promise<BusinessCard> => {
   try {
     // Generate a unique URL identifier
-    const uniqueUrl = nanoid(10);
+    const uniqueUrl = Math.random().toString(36).substring(2, 12);
 
     // Insert business card record
     const result = await db.insert(businessCardsTable)
       .values({
+        user_id: userId,
         name: input.name,
         title: input.title || null,
         company: input.company || null,

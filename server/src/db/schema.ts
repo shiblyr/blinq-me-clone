@@ -1,8 +1,17 @@
 
-import { serial, text, pgTable, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { serial, text, pgTable, timestamp, varchar, integer } from 'drizzle-orm/pg-core';
+
+export const usersTable = pgTable('users', {
+  id: serial('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  password_hash: text('password_hash').notNull(),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+});
 
 export const businessCardsTable = pgTable('business_cards', {
   id: serial('id').primaryKey(),
+  user_id: integer('user_id').notNull().references(() => usersTable.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   title: text('title'), // Nullable by default
   company: text('company'), // Nullable by default
@@ -20,8 +29,10 @@ export const businessCardsTable = pgTable('business_cards', {
 });
 
 // TypeScript types for the table schema
+export type User = typeof usersTable.$inferSelect; // For SELECT operations
+export type NewUser = typeof usersTable.$inferInsert; // For INSERT operations
 export type BusinessCard = typeof businessCardsTable.$inferSelect; // For SELECT operations
 export type NewBusinessCard = typeof businessCardsTable.$inferInsert; // For INSERT operations
 
 // Important: Export all tables for proper query building
-export const tables = { businessCards: businessCardsTable };
+export const tables = { users: usersTable, businessCards: businessCardsTable };

@@ -2,13 +2,16 @@
 import { db } from '../db';
 import { businessCardsTable } from '../db/schema';
 import { type GetBusinessCardByIdInput } from '../schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
-export const deleteBusinessCard = async (input: GetBusinessCardByIdInput): Promise<{ success: boolean }> => {
+export const deleteBusinessCard = async (input: GetBusinessCardByIdInput, userId: number): Promise<{ success: boolean }> => {
   try {
-    // Delete the business card record
+    // Delete the business card record (only if it belongs to the user)
     const result = await db.delete(businessCardsTable)
-      .where(eq(businessCardsTable.id, input.id))
+      .where(and(
+        eq(businessCardsTable.id, input.id),
+        eq(businessCardsTable.user_id, userId)
+      ))
       .returning()
       .execute();
 

@@ -2,10 +2,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { businessCardsTable } from '../db/schema';
-import { type GetBusinessCardByIdInput, type CreateBusinessCardInput } from '../schema';
+import { businessCardsTable, usersTable } from '../db/schema';
+import { type GetBusinessCardByIdInput, type CreateBusinessCardInput, type SignupInput } from '../schema';
 import { deleteBusinessCard } from '../handlers/delete_business_card';
+import { signup } from '../handlers/auth/signup';
 import { eq } from 'drizzle-orm';
+
+// Test user for authentication
+const testUser: SignupInput = {
+  email: 'test@example.com',
+  password: 'testpassword123'
+};
 
 // Test input for creating a business card
 const testBusinessCard: CreateBusinessCardInput = {
@@ -22,14 +29,31 @@ const testBusinessCard: CreateBusinessCardInput = {
 };
 
 describe('deleteBusinessCard', () => {
-  beforeEach(createDB);
+  let userId: number;
+
+  beforeEach(async () => {
+    await createDB();
+    
+    // Create test user
+    await signup(testUser);
+    
+    // Get user ID
+    const users = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.email, testUser.email))
+      .execute();
+    
+    userId = users[0].id;
+  });
+  
   afterEach(resetDB);
 
-  it('should delete an existing business card', async () => {
+  it('should delete an existing business card that belongs to the user', async () => {
     // Create a business card first
     const createResult = await db.insert(businessCardsTable)
       .values({
         ...testBusinessCard,
+        user_id: userId,
         unique_url: 'john-doe-123'
       })
       .returning()
@@ -42,7 +66,7 @@ describe('deleteBusinessCard', () => {
       id: businessCardId
     };
 
-    const result = await deleteBusinessCard(deleteInput);
+    const result = await deleteBusinessCard(deleteInput, userId);
 
     // Verify deletion was successful
     expect(result.success).toBe(true);
@@ -61,17 +85,64 @@ describe('deleteBusinessCard', () => {
       id: 999 // Non-existent ID
     };
 
-    const result = await deleteBusinessCard(deleteInput);
+    const result = await deleteBusinessCard(deleteInput, userId);
 
     // Verify deletion was unsuccessful
     expect(result.success).toBe(false);
   });
 
+  it('should not allow deletion of business cards belonging to other users', async () => {
+    // Create another user
+    const otherUser: SignupInput = {
+      email: 'other@example.com',
+      password: 'otherpassword123'
+    };
+    await signup(otherUser);
+    
+    const otherUsers = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.email, otherUser.email))
+      .execute();
+    
+    const otherUserId = otherUsers[0].id;
+
+    // Create a business card for the other user
+    const createResult = await db.insert(businessCardsTable)
+      .values({
+        ...testBusinessCard,
+        user_id: otherUserId,
+        unique_url: 'other-user-card'
+      })
+      .returning()
+      .execute();
+
+    const businessCardId = createResult[0].id;
+
+    // Try to delete with wrong user ID
+    const deleteInput: GetBusinessCardByIdInput = {
+      id: businessCardId
+    };
+
+    const result = await deleteBusinessCard(deleteInput, userId);
+
+    // Verify deletion was unsuccessful
+    expect(result.success).toBe(false);
+
+    // Verify the business card still exists
+    const businessCards = await db.select()
+      .from(businessCardsTable)
+      .where(eq(businessCardsTable.id, businessCardId))
+      .execute();
+
+    expect(businessCards).toHaveLength(1);
+  });
+
   it('should not affect other business cards when deleting one', async () => {
-    // Create two business cards
+    // Create two business cards for the same user
     const firstCard = await db.insert(businessCardsTable)
       .values({
         ...testBusinessCard,
+        user_id: userId,
         name: 'John Doe',
         unique_url: 'john-doe-123'
       })
@@ -81,6 +152,7 @@ describe('deleteBusinessCard', () => {
     const secondCard = await db.insert(businessCardsTable)
       .values({
         ...testBusinessCard,
+        user_id: userId,
         name: 'Jane Smith',
         unique_url: 'jane-smith-456'
       })
@@ -92,7 +164,7 @@ describe('deleteBusinessCard', () => {
       id: firstCard[0].id
     };
 
-    const result = await deleteBusinessCard(deleteInput);
+    const result = await deleteBusinessCard(deleteInput, userId);
 
     // Verify deletion was successful
     expect(result.success).toBe(true);

@@ -2,18 +2,21 @@
 import { db } from '../db';
 import { businessCardsTable } from '../db/schema';
 import { type GenerateQrCodeInput, type BusinessCard } from '../schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
-export const generateQrCode = async (input: GenerateQrCodeInput): Promise<BusinessCard> => {
+export const generateQrCode = async (input: GenerateQrCodeInput, userId: number): Promise<BusinessCard> => {
   try {
-    // First, check if the business card exists
+    // First, check if the business card exists and belongs to the user
     const existingCard = await db.select()
       .from(businessCardsTable)
-      .where(eq(businessCardsTable.id, input.id))
+      .where(and(
+        eq(businessCardsTable.id, input.id),
+        eq(businessCardsTable.user_id, userId)
+      ))
       .execute();
 
     if (existingCard.length === 0) {
-      throw new Error(`Business card with id ${input.id} not found`);
+      throw new Error(`Business card with id ${input.id} not found or you don't have permission to access it`);
     }
 
     const card = existingCard[0];
@@ -27,7 +30,10 @@ export const generateQrCode = async (input: GenerateQrCodeInput): Promise<Busine
         qr_code_url: qrCodeUrl,
         updated_at: new Date()
       })
-      .where(eq(businessCardsTable.id, input.id))
+      .where(and(
+        eq(businessCardsTable.id, input.id),
+        eq(businessCardsTable.user_id, userId)
+      ))
       .returning()
       .execute();
 

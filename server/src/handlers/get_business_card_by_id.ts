@@ -4,7 +4,7 @@ import { businessCardsTable } from '../db/schema';
 import { type GetBusinessCardByIdInput, type BusinessCard } from '../schema';
 import { eq } from 'drizzle-orm';
 
-export const getBusinessCardById = async (input: GetBusinessCardByIdInput): Promise<BusinessCard | null> => {
+export const getBusinessCardById = async (input: GetBusinessCardByIdInput): Promise<BusinessCard> => {
   try {
     const results = await db.select()
       .from(businessCardsTable)
@@ -12,7 +12,7 @@ export const getBusinessCardById = async (input: GetBusinessCardByIdInput): Prom
       .execute();
 
     if (results.length === 0) {
-      return null;
+      throw new Error(`Business card with id ${input.id} not found`);
     }
 
     return results[0];
